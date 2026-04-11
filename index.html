@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WellCall Lite</title>
+    <link rel="stylesheet" href="css/main.css">
+    <link rel="stylesheet" href="css/call-ui.css">
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.2.2/build/qrcode.min.js"></script>
+</head>
+<body>
+    <div id="app" class="app-container">
+        <div id="mainScreen" class="main-screen">
+            <div class="logo-section">
+                <div class="logo-icon">📞</div>
+                <h1>WellCall Lite</h1>
+                <p class="subtitle">Простой видеозвонок в один клик</p>
+            </div>
+
+            <button id="createRoomBtn" class="btn-primary">
+                <span class="btn-icon">➕</span>
+                <span class="btn-text">Создать комнату</span>
+            </button>
+
+            <div id="roomInfo" class="room-info hidden">
+                <p class="room-label">Ссылка на комнату:</p>
+                <div class="link-container">
+                    <input type="text" id="roomLink" class="room-link" readonly />
+                    <button id="copyLinkBtn" class="btn-copy" title="Копировать">📋</button>
+                </div>
+                <div id="qrCodeContainer" class="qr-code-container hidden">
+                    <canvas id="qrCode"></canvas>
+                    <p class="qr-hint">Сканируйте QR-код камерой</p>
+                </div>
+                <p class="room-hint">Отправьте эту ссылку собеседнику</p>
+                <div id="waitingStatus" class="waiting-status">
+                    <div class="spinner"></div>
+                    <span>Ожидание собеседника...</span>
+                </div>
+            </div>
+        </div>
+
+        <div id="callScreen" class="call-screen hidden"></div>
+
+        <div id="connectionStatus" class="connection-status hidden">
+            <div class="status-indicator"></div>
+            <span class="status-text">Подключение...</span>
+        </div>
+
+        <div id="incomingCallModal" class="modal hidden">
+            <div class="modal-content">
+                <div class="modal-body">
+                    <div class="caller-avatar">📞</div>
+                    <div class="caller-info">
+                        <div class="caller-name">Входящий звонок</div>
+                        <div class="caller-status">Кто-то хочет связаться с вами</div>
+                    </div>
+                    <div class="call-actions">
+                        <button id="acceptCallBtn" class="btn btn-success">
+                            <span class="btn-icon">✅</span>
+                            <span class="btn-text">Ответить</span>
+                        </button>
+                        <button id="declineCallBtn" class="btn btn-danger">
+                            <span class="btn-icon">❌</span>
+                            <span class="btn-text">Отклонить</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="js/main.js"></script>
+</body>
+</html>

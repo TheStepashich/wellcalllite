@@ -1,0 +1,679 @@
+.call-ui-container {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: #0a0a0a;
+    z-index: 2000;
+    display: flex;
+    flex-direction: column;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.3s ease, visibility 0.3s ease;
+}
+
+.call-ui-container.active {
+    opacity: 1;
+    visibility: visible;
+}
+
+.call-ui-header {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    padding: 20px 24px;
+    background: linear-gradient(to bottom, rgba(0, 0, 0, 0.6), transparent);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    z-index: 10;
+    pointer-events: none;
+    opacity: 1;
+    transform: translateY(0);
+    transition: opacity 0.4s ease, transform 0.4s ease;
+}
+
+.call-ui-header.hidden {
+    opacity: 0;
+    transform: translateY(-20px);
+    pointer-events: none;
+}
+
+.call-ui-header > * {
+    pointer-events: auto;
+}
+
+.call-partner-info {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.call-partner-avatar {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    border: 2px solid rgba(255, 255, 255, 0.2);
+}
+
+.call-partner-details {
+    color: white;
+}
+
+.call-partner-name {
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.call-partner-status {
+    font-size: 14px;
+    opacity: 0.8;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.call-partner-status .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #10b981;
+}
+
+.call-partner-status .status-text {
+    font-size: 13px;
+}
+
+.call-ui-actions {
+    display: flex;
+    gap: 12px;
+}
+
+.call-ui-btn {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(255, 255, 255, 0.15);
+    backdrop-filter: blur(10px);
+    color: white;
+    font-size: 20px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+
+.call-ui-btn:hover {
+    background: rgba(255, 255, 255, 0.25);
+    transform: scale(1.05);
+}
+
+.call-ui-btn:active {
+    transform: scale(0.95);
+}
+
+.call-ui-btn.active {
+    background: rgba(102, 126, 234, 0.8);
+}
+
+.call-ui-video-area {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+}
+
+.remote-videos-grid {
+    display: grid;
+    width: 100%;
+    height: 100%;
+    gap: 8px;
+    padding: 8px;
+    box-sizing: border-box;
+}
+
+.remote-video-wrapper {
+    position: relative;
+    background: #1a1a1a;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.remote-video-wrapper video {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+.call-ui-remote-video-wrapper {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: #1a1a1a;
+}
+
+.call-ui-remote-video {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    background: #1a1a1a;
+}
+
+.call-ui-remote-video-placeholder {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.call-ui-remote-video-placeholder .placeholder-icon {
+    font-size: 80px;
+    margin-bottom: 16px;
+    opacity: 0.5;
+}
+
+.call-ui-remote-video-placeholder .placeholder-text {
+    font-size: 18px;
+    font-weight: 500;
+}
+
+.call-ui-local-video-wrapper {
+    position: absolute;
+    bottom: 100px;
+    right: 24px;
+    width: 180px;
+    height: 135px;
+    border-radius: 12px;
+    overflow: hidden;
+    background: #2a2a2a;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    border: 2px solid rgba(255, 255, 255, 0.1);
+    cursor: move;
+    transition: all 0.2s ease;
+    z-index: 20;
+}
+
+.call-ui-local-video-wrapper:hover {
+    border-color: rgba(255, 255, 255, 0.3);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+
+.call-ui-local-video-wrapper.dragging {
+    cursor: grabbing;
+    opacity: 0.9;
+}
+
+.call-ui-local-video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    background: #2a2a2a;
+}
+
+.call-ui-local-video-label {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    background: rgba(0, 0, 0, 0.6);
+    color: white;
+    padding: 4px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 500;
+    backdrop-filter: blur(4px);
+}
+
+.call-ui-controls {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 20px 24px 32px;
+    background: linear-gradient(to top, rgba(0, 0, 0, 0.8), transparent);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    z-index: 10;
+    opacity: 1;
+    transform: translateY(0);
+    transition: opacity 0.4s ease, transform 0.4s ease;
+}
+
+.call-ui-controls.hidden {
+    opacity: 0;
+    transform: translateY(20px);
+    pointer-events: none;
+}
+
+.call-ui-controls-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.call-ui-control-btn {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(255, 255, 255, 0.15);
+    backdrop-filter: blur(10px);
+    color: white;
+    font-size: 24px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    position: relative;
+}
+
+.call-ui-control-btn:hover {
+    background: rgba(255, 255, 255, 0.25);
+    transform: scale(1.05);
+}
+
+.call-ui-control-btn:active {
+    transform: scale(0.95);
+}
+
+.call-ui-control-btn.active {
+    background: rgba(102, 126, 234, 0.9);
+}
+
+.call-ui-control-btn.danger {
+    background: rgba(239, 68, 68, 0.9);
+}
+
+.call-ui-control-btn.danger:hover {
+    background: rgba(239, 68, 68, 1);
+}
+
+.call-ui-control-btn .badge {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #ef4444;
+    color: white;
+    font-size: 11px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.call-ui-chat-overlay {
+    position: absolute;
+    top: 80px;
+    left: 24px;
+    right: 24px;
+    bottom: 140px;
+    max-width: 420px;
+    background: rgba(20, 20, 20, 0.95);
+    backdrop-filter: blur(20px);
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    display: flex;
+    flex-direction: column;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(20px);
+    transition: all 0.3s ease;
+    z-index: 30;
+}
+
+.call-ui-chat-overlay.active {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+}
+
+.call-ui-chat-header {
+    padding: 16px 20px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.call-ui-chat-header h3 {
+    color: white;
+    font-size: 16px;
+    font-weight: 600;
+    margin: 0;
+}
+
+.call-ui-chat-close {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    border: none;
+    background: rgba(255, 255, 255, 0.1);
+    color: white;
+    font-size: 18px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+}
+
+.call-ui-chat-close:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.call-ui-chat-messages {
+    flex: 1;
+    padding: 16px 20px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.call-ui-chat-messages::-webkit-scrollbar {
+    width: 6px;
+}
+
+.call-ui-chat-messages::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.call-ui-chat-messages::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 3px;
+}
+
+.call-ui-chat-messages::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+.call-ui-message {
+    max-width: 85%;
+    padding: 10px 14px;
+    border-radius: 16px;
+    font-size: 14px;
+    line-height: 1.4;
+    word-wrap: break-word;
+}
+
+.call-ui-message.incoming {
+    align-self: flex-start;
+    background: rgba(255, 255, 255, 0.1);
+    color: white;
+    border-bottom-left-radius: 4px;
+}
+
+.call-ui-message.outgoing {
+    align-self: flex-end;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border-bottom-right-radius: 4px;
+}
+
+.call-ui-message-time {
+    font-size: 11px;
+    opacity: 0.7;
+    margin-top: 4px;
+}
+
+.call-ui-chat-input {
+    padding: 16px 20px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    display: flex;
+    gap: 12px;
+}
+
+.call-ui-chat-input input {
+    flex: 1;
+    padding: 12px 16px;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 24px;
+    color: white;
+    font-size: 14px;
+    outline: none;
+    transition: all 0.2s;
+}
+
+.call-ui-chat-input input::placeholder {
+    color: rgba(255, 255, 255, 0.5);
+}
+
+.call-ui-chat-input input:focus {
+    background: rgba(255, 255, 255, 0.15);
+    border-color: rgba(102, 126, 234, 0.5);
+}
+
+.call-ui-chat-send-btn {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    border: none;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    font-size: 18px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+}
+
+.call-ui-chat-send-btn:hover {
+    transform: scale(1.05);
+}
+
+.call-ui-chat-send-btn:active {
+    transform: scale(0.95);
+}
+
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.5;
+    }
+}
+
+.call-ui-remote-video-placeholder .placeholder-icon {
+    animation: pulse 2s ease-in-out infinite;
+}
+
+.call-ui-container.connecting .call-ui-remote-video-placeholder .placeholder-text {
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+.call-ui-container.connected .call-ui-remote-video-placeholder {
+    display: none;
+}
+
+.call-ui-container.connected .call-ui-remote-video {
+    display: block;
+}
+
+@media (max-width: 768px) {
+    .call-ui-header {
+        padding: 16px;
+    }
+
+    .call-partner-avatar {
+        width: 40px;
+        height: 40px;
+        font-size: 20px;
+    }
+
+    .call-partner-name {
+        font-size: 16px;
+    }
+
+    .call-partner-status {
+        font-size: 12px;
+    }
+
+    .call-ui-btn {
+        width: 40px;
+        height: 40px;
+        font-size: 18px;
+    }
+
+    .call-ui-local-video-wrapper {
+        width: 140px;
+        height: 105px;
+        bottom: 140px;
+        right: 16px;
+    }
+
+    .call-ui-controls {
+        padding: 16px;
+        padding-bottom: 24px;
+    }
+
+    .call-ui-control-btn {
+        width: 50px;
+        height: 50px;
+        font-size: 22px;
+    }
+
+    .call-ui-chat-overlay {
+        top: 70px;
+        left: 16px;
+        right: 16px;
+        bottom: 130px;
+        max-width: none;
+    }
+
+    .call-ui-chat-header {
+        padding: 12px 16px;
+    }
+
+    .call-ui-chat-messages {
+        padding: 12px 16px;
+    }
+
+    .call-ui-chat-input {
+        padding: 12px 16px;
+    }
+}
+
+@media (max-width: 480px) {
+    .call-ui-local-video-wrapper {
+        width: 120px;
+        height: 90px;
+        bottom: 130px;
+        right: 12px;
+    }
+
+    .call-ui-control-btn {
+        width: 48px;
+        height: 48px;
+        font-size: 20px;
+    }
+
+    .call-partner-name {
+        font-size: 14px;
+    }
+
+    .call-ui-chat-messages {
+        font-size: 13px;
+    }
+
+    .call-ui-message {
+        padding: 8px 12px;
+        font-size: 13px;
+    }
+}
+
+.call-ui-participants {
+    position: absolute;
+    top: 60px;
+    right: 0;
+    width: 200px;
+    max-height: 300px;
+    background: rgba(20, 20, 20, 0.95);
+    border-radius: 8px 0 0 8px;
+    overflow: hidden;
+    transform: translateX(100%);
+    transition: transform 0.3s ease;
+    z-index: 100;
+}
+
+.call-ui-container.show-participants .call-ui-participants {
+    transform: translateX(0);
+}
+
+.call-ui-participants-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    font-weight: 600;
+    color: white;
+}
+
+.call-ui-participants-header button {
+    background: none;
+    border: none;
+    color: white;
+    font-size: 20px;
+    cursor: pointer;
+    opacity: 0.7;
+}
+
+.call-ui-participants-header button:hover {
+    opacity: 1;
+}
+
+.call-ui-participants-list {
+    padding: 8px 0;
+    max-height: 240px;
+    overflow-y: auto;
+}
+
+.call-ui-participant {
+    display: flex;
+    align-items: center;
+    padding: 8px 16px;
+    color: white;
+    font-size: 14px;
+}
+
+.call-ui-participant-name {
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.call-ui-remote-video-label {
+    position: absolute;
+    bottom: 8px;
+    left: 8px;
+    background: rgba(0, 0, 0, 0.7);
+    color: white;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    z-index: 10;
+}
