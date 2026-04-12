@@ -631,7 +631,7 @@ export class WebRTCHandler {
             this.pc.addTrack(screenTrack, screenStream);
         }
 
-        if (screenAudioTrack) {
+        if (screenAudioTrack?.readyState === 'live') {
             const audioSender = senders.find(s => s.track?.kind === 'audio' && s.track?.label?.toLowerCase().includes('screen'));
             if (audioSender) {
                 console.log('[WebRTC] Replacing screen audio track');

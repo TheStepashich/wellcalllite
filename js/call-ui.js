@@ -91,7 +91,6 @@ export class CallUI {
                     <button class="call-ui-control-btn" id="callUiCameraBtn" title="Камера">📷</button>
                     <button class="call-ui-control-btn ${!this.hasMultipleCameras ? 'hidden' : ''}" id="callUiCamSwitchBtn" title="Переключить камеру">🔄</button>
                     <button class="call-ui-control-btn ${this.isMobile ? 'hidden' : ''}" id="callUiScreenBtn" title="Демонстрация экрана">🖥️</button>
-                    <button class="call-ui-control-btn hidden" id="callUiScreenAudioBtn" title="Звук экрана">🔊</button>
                     <button class="call-ui-control-btn" id="callUiShareBtn" title="Поделиться">🔗</button>
                     <button class="call-ui-control-btn" id="callUiChatBtn" title="Чат">💬</button>
                     <button class="call-ui-control-btn" id="callUiParticipantsBtn" title="Участники">👥</button>
@@ -137,10 +136,6 @@ export class CallUI {
 
         document.getElementById('callUiScreenBtn').addEventListener('click', () => {
             this.callbacks.onToggleScreen?.();
-        });
-
-        document.getElementById('callUiScreenAudioBtn').addEventListener('click', () => {
-            this.callbacks.onToggleScreenAudio?.();
         });
 
         document.getElementById('callUiShareBtn').addEventListener('click', () => {
@@ -559,27 +554,11 @@ export class CallUI {
 
     updateScreenState(enabled) {
         const btn = document.getElementById('callUiScreenBtn');
-        const audioBtn = document.getElementById('callUiScreenAudioBtn');
 
         if (enabled) {
             btn.classList.add('active');
-            audioBtn.classList.remove('hidden');
         } else {
             btn.classList.remove('active');
-            audioBtn.classList.add('hidden');
-        }
-    }
-
-    updateScreenAudioState(enabled) {
-        const btn = document.getElementById('callUiScreenAudioBtn');
-        if (!btn) return;
-
-        if (enabled) {
-            btn.classList.add('active');
-            btn.textContent = '🔊';
-        } else {
-            btn.classList.remove('active');
-            btn.textContent = '🔇';
         }
     }
 

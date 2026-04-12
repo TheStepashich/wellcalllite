@@ -9,6 +9,7 @@ export class MediaHandler {
         this.isScreenAudioEnabled = false;
         this.currentFacingMode = 'user';
         this.pendingVideoTrack = null;
+        this.onScreenShareEnded = null;
     }
 
     async initialize() {
@@ -209,10 +210,13 @@ export class MediaHandler {
         if (!screenTrack) throw new Error('No screen track');
 
         this.isScreenSharing = true;
-        this.isScreenAudioEnabled = true;
+
+        const screenAudioTracks = this.screenStream.getAudioTracks();
+        this.isScreenAudioEnabled = screenAudioTracks.length > 0 && screenAudioTracks[0].readyState === 'live';
 
         screenTrack.addEventListener('ended', () => {
             this.stopScreenShare();
+            this.onScreenShareEnded?.();
         });
 
         return screenTrack;
@@ -232,7 +236,8 @@ export class MediaHandler {
     }
 
     getScreenAudioTrack() {
-        return this.screenStream?.getAudioTracks()?.[0] || null;
+        const tracks = this.screenStream?.getAudioTracks() || [];
+        return tracks.find(t => t.readyState === 'live') || null;
     }
 
     getLocalStream() {

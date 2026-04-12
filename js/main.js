@@ -695,7 +695,6 @@ class WellCallApp {
         this.callUI.on('onToggleCamera', () => this.toggleCamera());
         this.callUI.on('onToggleCamSwitch', () => this.switchCamera());
         this.callUI.on('onToggleScreen', () => this.toggleScreen());
-        this.callUI.on('onToggleScreenAudio', () => this.toggleScreenAudio());
         this.callUI.on('onShare', () => this.shareRoom());
         this.callUI.on('onSendMessage', (text) => this.sendMessage(text));
         this.callUI.on('onVolumeChange', (peerId, volume) => this.setPeerVolume(peerId, volume));
@@ -787,12 +786,14 @@ class WellCallApp {
 
     async startScreenShare() {
         try {
+            this.media.onScreenShareEnded = () => this.handleScreenShareEnded();
+
             const screenTrack = await this.media.startScreenShare();
             if (!screenTrack) return;
 
             const screenStream = this.media.getScreenStream();
             const screenAudioTrack = this.media.getScreenAudioTrack();
-            this.isScreenAudioEnabled = true;
+            this.isScreenAudioEnabled = this.media.isScreenAudioEnabled;
 
             for (const peer of this.peers.values()) {
                 await peer.addScreenTrack(screenTrack, screenStream, screenAudioTrack);
@@ -802,7 +803,6 @@ class WellCallApp {
             if (this.callUI) {
                 this.callUI.setLocalStream(stream);
                 this.callUI.updateScreenState(true);
-                this.callUI.updateScreenAudioState(true);
             }
         } catch (error) {
             console.error('[App] Screen share failed:', error);
@@ -812,7 +812,26 @@ class WellCallApp {
         }
     }
 
+    handleScreenShareEnded() {
+        console.log('[App] Screen share ended by user');
+
+        this.media.onScreenShareEnded = null;
+
+        for (const peer of this.peers.values()) {
+            peer.removeScreenTrack();
+        }
+
+        this.media.stopScreenShare();
+
+        const stream = this.getLocalStream();
+        if (this.callUI) {
+            this.callUI.setLocalStream(stream);
+            this.callUI.updateScreenState(false);
+        }
+    }
+
     async stopScreenShare() {
+        this.media.onScreenShareEnded = null;
         const audioTrack = this.media.getAudioTrackSync();
 
         for (const peer of this.peers.values()) {
@@ -834,20 +853,6 @@ class WellCallApp {
             if (sent && this.callUI) {
                 this.callUI.addMessage(text, true);
             }
-        }
-    }
-
-    toggleScreenAudio() {
-        if (!this.media.isScreenSharing) return;
-
-        this.isScreenAudioEnabled = !this.isScreenAudioEnabled;
-        const screenAudio = this.media.getScreenAudioTrack();
-        if (screenAudio) {
-            screenAudio.enabled = this.isScreenAudioEnabled;
-        }
-
-        if (this.callUI) {
-            this.callUI.updateScreenAudioState(this.isScreenAudioEnabled);
         }
     }
 
