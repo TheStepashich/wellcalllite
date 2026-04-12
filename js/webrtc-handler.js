@@ -597,7 +597,7 @@ export class WebRTCHandler {
         }
     }
 
-    async addScreenTrack(screenTrack, screenStream) {
+    async addScreenTrack(screenTrack, screenStream, screenAudioTrack = null) {
         if (!this.pc) return;
 
         const senders = this.pc.getSenders();
@@ -631,19 +631,45 @@ export class WebRTCHandler {
             this.pc.addTrack(screenTrack, screenStream);
         }
 
+        if (screenAudioTrack) {
+            const audioSender = senders.find(s => s.track?.kind === 'audio' && s.track?.label?.toLowerCase().includes('screen'));
+            if (audioSender) {
+                console.log('[WebRTC] Replacing screen audio track');
+                await audioSender.replaceTrack(screenAudioTrack);
+            } else {
+                console.log('[WebRTC] Adding screen audio track');
+                this.pc.addTrack(screenAudioTrack, screenStream);
+            }
+        }
+
         await this.renegotiate();
         console.log('[WebRTC] Screen track added, renegotiation complete');
     }
 
-    async removeScreenTrack() {
+    async removeScreenTrack(restoreAudioTrack = null) {
         if (!this.pc) return;
 
-        const videoSender = this.pc.getSenders().find(s => s.track?.kind === 'video');
+        const senders = this.pc.getSenders();
+        const videoSender = senders.find(s => s.track?.kind === 'video');
+        const screenAudioSender = senders.find(s => s.track?.kind === 'audio' && s.track?.label?.toLowerCase().includes('screen'));
+        
         if (videoSender) {
             console.log('[WebRTC] Replacing video track with black');
             const blackTrack = this.createBlackVideoTrack();
             await videoSender.replaceTrack(blackTrack);
             console.log('[WebRTC] Screen track replaced with black');
+        }
+
+        if (screenAudioSender) {
+            console.log('[WebRTC] Removing screen audio track');
+            if (restoreAudioTrack) {
+                await screenAudioSender.replaceTrack(restoreAudioTrack);
+            } else {
+                const audioTrack = this.localStream?.getAudioTracks()?.[0];
+                if (audioTrack) {
+                    await screenAudioSender.replaceTrack(audioTrack);
+                }
+            }
         }
     }
 

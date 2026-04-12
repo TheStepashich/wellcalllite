@@ -5,6 +5,10 @@ export function generateUUID() {
     return localStorage.uuid;
 }
 
+export function generateRoomId() {
+    return crypto.randomUUID();
+}
+
 export function getUUID() {
     return localStorage.uuid || null;
 }

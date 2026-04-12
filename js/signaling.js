@@ -96,6 +96,11 @@ export class Signaling {
         return true;
     }
 
+    broadcast(message) {
+        message.broadcast = true;
+        return this.send(message);
+    }
+
     flushQueue() {
         if (this.queue.length === 0) return;
 

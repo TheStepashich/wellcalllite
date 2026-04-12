@@ -1,14 +1,16 @@
-import { generateUUID, saveRoomId, getRoomId, clearRoomId } from './uuid.js';
+import { generateUUID, generateRoomId, saveRoomId, getRoomId, clearRoomId } from './uuid.js';
 import { Signaling } from './signaling.js';
 import { CryptoHandler } from './crypto.js';
 import { MediaHandler } from './media-handler.js';
 import { WebRTCHandler } from './webrtc-handler.js';
 import { CallUI } from './call-ui.js';
+import { VolumeManager } from './volume-manager.js';
 
 class WellCallApp {
     constructor() {
         this.uuid = generateUUID();
         this.roomId = null;
+        this.roomOwner = null;
         this.isCreator = false;
         this.isInCall = false;
         this.isRoomHeir = false;
@@ -16,6 +18,7 @@ class WellCallApp {
         this.signaling = null;
         this.crypto = new CryptoHandler();
         this.media = new MediaHandler();
+        this.volumeManager = new VolumeManager();
         this.callUI = null;
 
         this.peers = new Map();
@@ -49,7 +52,9 @@ class WellCallApp {
 
         if (roomIdParam) {
             this.roomId = roomIdParam;
+            this.roomOwner = roomIdParam;
             this.isCreator = false;
+            console.log('[App] Joining as participant, roomOwner:', this.roomOwner.substring(0, 8));
             await this.joinRoom();
         } else if (inheritedRoomId && inheritedRoomId !== this.uuid) {
             console.log('[App] Inheriting room:', inheritedRoomId.substring(0, 8));
@@ -59,9 +64,10 @@ class WellCallApp {
             await this.inheritRoom();
         } else {
             this.isCreator = true;
+            this.roomOwner = this.uuid;
         }
 
-        console.log('[App] Initialized, UUID:', this.uuid.substring(0, 8));
+        console.log('[App] Initialized, UUID:', this.uuid.substring(0, 8), 'roomId:', this.roomId?.substring(0, 8), 'roomOwner:', this.roomOwner?.substring(0, 8));
     }
 
     detectMobile() {
@@ -117,9 +123,12 @@ class WellCallApp {
         console.log('[App] Creating room...');
 
         this.roomId = this.uuid;
+        this.roomOwner = this.uuid;
+        console.log('[App] Created roomId (full):', this.roomId);
         saveRoomId(this.roomId);
 
         const link = `${window.location.origin}${window.location.pathname}?room=${this.roomId}`;
+        console.log('[App] Generated link:', link);
         this.elements.roomLink.value = link;
 
         this.elements.createRoomBtn.classList.add('hidden');
@@ -219,13 +228,17 @@ class WellCallApp {
 
         if (this.signaling.registered) {
             if (this.roomId && this.roomId !== this.uuid) {
+                console.log('[App] Sending presence TO room creator:', this.roomId);
                 this.signaling.send({
                     type: 'presence',
-                    to: this.roomId,
+                    to: this.roomOwner,
                     from: this.uuid,
+                    roomId: this.roomId,
+                    roomOwner: this.roomOwner,
                     status: 'online'
                 });
             } else {
+                console.log('[App] Sending presence (no roomId in URL)');
                 this.signaling.send({
                     type: 'presence',
                     status: 'online'
@@ -235,7 +248,7 @@ class WellCallApp {
     }
 
     handleSignalingMessage(msg) {
-        console.log('[App] Message:', msg.type, 'from:', msg.from?.substring(0, 8));
+        console.log('[App] Message:', msg.type, 'from:', msg.from?.substring(0, 8), 'roomId:', msg.roomId?.substring(0, 8));
 
         switch (msg.type) {
             case 'registered':
@@ -253,6 +266,10 @@ class WellCallApp {
 
             case 'room-heir-transfer':
                 this.handleRoomHeirTransfer(msg);
+                break;
+
+            case 'room-migrated':
+                this.handleRoomMigrated(msg);
                 break;
 
             case 'offer':
@@ -317,8 +334,8 @@ class WellCallApp {
             return;
         }
 
-        if (!this.isCreator && !this.isRoomHeir && fromUUID === this.roomId) {
-            console.log('[App] Received presence from room owner, waiting for offer...');
+        if (!this.isCreator && !this.isRoomHeir && this.roomOwner && fromUUID === this.roomOwner) {
+            console.log('[App] Received presence from room owner:', fromUUID.substring(0, 8), 'waiting for offer...');
 
             if (msg.roomMembers && Array.isArray(msg.roomMembers)) {
                 for (const memberId of msg.roomMembers) {
@@ -420,6 +437,12 @@ class WellCallApp {
 
         this.remoteStreams.delete(leftUUID);
         this.updateRemoteStreams();
+        this.updateParticipantsList();
+        
+        if (this.callUI) {
+            this.callUI.hideVolumeControls();
+            this.callUI.updateSingleViewVolumeControls();
+        }
     }
 
     handleRoomHeirTransfer(msg) {
@@ -449,6 +472,35 @@ class WellCallApp {
                 roomId: this.roomId
             });
         }
+    }
+
+    async handleRoomMigrated(msg) {
+        console.log('[App] Room migrated from', msg.oldRoomId?.substring(0, 8), 'to', msg.newRoomId?.substring(0, 8));
+        
+        const newRoomId = msg.newRoomId;
+        this.roomId = newRoomId;
+        this.roomOwner = newRoomId;
+        saveRoomId(newRoomId);
+        
+        const newLink = `${window.location.origin}${window.location.pathname}?room=${newRoomId}`;
+        
+        if (this.elements?.roomLink) {
+            this.elements.roomLink.value = newLink;
+        }
+        
+        this.generateQRCode(newLink);
+        
+        window.history.replaceState(null, '', `?room=${newRoomId}`);
+        
+        this.isRoomHeir = true;
+        this.isCreator = false;
+        
+        this.signaling.send({
+            type: 'presence',
+            status: 'online',
+            roomId: newRoomId,
+            isRoomHeir: true
+        });
     }
 
     handleCallEnded(msg) {
@@ -540,15 +592,30 @@ class WellCallApp {
         this.pendingICE.delete(from);
     }
 
-    updateRemoteStreams(latestStream = null) {
+    async updateRemoteStreams(latestStream = null) {
         console.log('[App] updateRemoteStreams, remoteStreams size:', this.remoteStreams.size);
 
-        if (latestStream) {
-            console.log('[App] Using latest stream with tracks:', latestStream.getTracks().map(t => t.kind));
+        let streamToUse = latestStream;
+        if (!streamToUse || streamToUse.getTracks().length === 0) {
+            for (const [, s] of this.remoteStreams) {
+                if (s.getTracks().length > 0) {
+                    streamToUse = s;
+                    break;
+                }
+            }
+        }
+
+        if (streamToUse) {
+            console.log('[App] Using stream with tracks:', streamToUse.getTracks().map(t => t.kind));
+        }
+
+        for (const [peerId, stream] of this.remoteStreams) {
+            await this.volumeManager.attachStream(peerId, stream);
         }
 
         if (this.callUI) {
-            this.callUI.setRemoteStream(latestStream, this.remoteStreams);
+            this.callUI.setRemoteStream(streamToUse, this.remoteStreams);
+            this.callUI.setVolumeManager(this.volumeManager);
         }
     }
 
@@ -557,6 +624,23 @@ class WellCallApp {
         
         const participants = [this.uuid, ...this.remoteStreams.keys()];
         this.callUI.updateParticipants(participants, this.uuid);
+    }
+
+    refreshParticipants() {
+        console.log('[App] Refreshing participants...');
+        
+        if (this.signaling?.registered && this.roomOwner) {
+            this.signaling.send({
+                type: 'presence',
+                to: this.roomOwner,
+                from: this.uuid,
+                roomId: this.roomId,
+                roomOwner: this.roomOwner,
+                status: 'online'
+            });
+        }
+        
+        this.updateParticipantsList();
     }
 
     getLocalStream() {
@@ -612,7 +696,10 @@ class WellCallApp {
         this.callUI.on('onToggleCamSwitch', () => this.switchCamera());
         this.callUI.on('onToggleScreen', () => this.toggleScreen());
         this.callUI.on('onToggleScreenAudio', () => this.toggleScreenAudio());
+        this.callUI.on('onShare', () => this.shareRoom());
         this.callUI.on('onSendMessage', (text) => this.sendMessage(text));
+        this.callUI.on('onVolumeChange', (peerId, volume) => this.setPeerVolume(peerId, volume));
+        this.callUI.on('onRefreshParticipants', () => this.refreshParticipants());
     }
 
     showCallUI() {
@@ -704,10 +791,11 @@ class WellCallApp {
             if (!screenTrack) return;
 
             const screenStream = this.media.getScreenStream();
+            const screenAudioTrack = this.media.getScreenAudioTrack();
             this.isScreenAudioEnabled = true;
 
             for (const peer of this.peers.values()) {
-                await peer.addScreenTrack(screenTrack, screenStream);
+                await peer.addScreenTrack(screenTrack, screenStream, screenAudioTrack);
             }
 
             const stream = this.getLocalStream();
@@ -728,11 +816,7 @@ class WellCallApp {
         const audioTrack = this.media.getAudioTrackSync();
 
         for (const peer of this.peers.values()) {
-            await peer.removeScreenTrack();
-
-            if (audioTrack) {
-                audioTrack.enabled = this.media.isAudioEnabled;
-            }
+            await peer.removeScreenTrack(audioTrack);
         }
 
         this.media.stopScreenShare();
@@ -767,6 +851,27 @@ class WellCallApp {
         }
     }
 
+    shareRoom() {
+        const roomIdToShare = this.roomOwner || this.roomId;
+        const link = `${window.location.origin}${window.location.pathname}?room=${roomIdToShare}`;
+        
+        if (navigator.share) {
+            navigator.share({
+                title: 'WellCall',
+                text: 'Присоединяйся к звонку!',
+                url: link
+            }).catch(() => {});
+        } else if (navigator.clipboard) {
+            navigator.clipboard.writeText(link).then(() => {
+                alert('Ссылка скопирована: ' + link);
+            }).catch(() => {
+                prompt('Скопируйте ссылку:', link);
+            });
+        } else {
+            prompt('Скопируйте ссылку:', link);
+        }
+    }
+
     sendMessage(text) {
         for (const peer of this.peers.values()) {
             peer.sendMessage(text);
@@ -774,6 +879,11 @@ class WellCallApp {
         if (this.peers.size > 0 && this.callUI) {
             this.callUI.addMessage(text, true);
         }
+    }
+
+    async setPeerVolume(peerId, volume) {
+        console.log('[App] setPeerVolume', peerId?.substring(0, 8), volume);
+        await this.volumeManager.setVolume(peerId, volume);
     }
 
     async acceptIncomingCall() {
@@ -832,14 +942,11 @@ class WellCallApp {
     hangup() {
         console.log('[App] Hanging up');
 
+        const peersArray = Array.from(this.peers.keys()).filter(id => id !== this.uuid);
+        
         let nextHeir = null;
-        if (this.peers.size > 0) {
-            for (const peerId of this.peers.keys()) {
-                if (peerId !== this.uuid) {
-                    nextHeir = peerId;
-                    break;
-                }
-            }
+        if (peersArray.length > 0 && (this.isCreator || this.isRoomHeir)) {
+            nextHeir = peersArray[Math.floor(Math.random() * peersArray.length)];
         }
 
         for (const peerId of this.peers.keys()) {
@@ -854,18 +961,23 @@ class WellCallApp {
                 from: this.uuid,
                 roomId: this.roomId
             });
-
-            if (nextHeir && (this.isCreator || this.isRoomHeir)) {
-                this.signaling.send({
-                    type: 'room-heir-transfer',
-                    to: peerId,
-                    from: this.uuid,
-                    roomId: this.roomId
-                });
-            }
         }
 
-        if (!nextHeir) {
+        if (nextHeir) {
+            this.signaling.send({
+                type: 'room-heir-transfer',
+                to: nextHeir,
+                from: this.uuid,
+                roomId: this.roomId
+            });
+            
+            this.signaling.broadcast({
+                type: 'room-migrated',
+                from: this.uuid,
+                oldRoomId: this.roomId,
+                newRoomId: nextHeir
+            });
+        } else {
             clearRoomId();
         }
 

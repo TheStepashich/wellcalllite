@@ -17,6 +17,9 @@ export class CallUI {
         this.uiVisible = true;
         this.wakeLock = null;
         this.callbacks = {};
+        this.volumeManager = null;
+        this.remoteStreamsMap = null;
+        this.expandedPeerId = null;
     }
 
     init() {
@@ -64,6 +67,7 @@ export class CallUI {
             <div class="call-ui-participants" id="callUiParticipants">
                 <div class="call-ui-participants-header">
                     <span>Участники</span>
+                    <button id="callUiParticipantsRefresh" title="Обновить">↻</button>
                     <button id="callUiParticipantsClose">×</button>
                 </div>
                 <div class="call-ui-participants-list" id="callUiParticipantsList"></div>
@@ -88,6 +92,7 @@ export class CallUI {
                     <button class="call-ui-control-btn ${!this.hasMultipleCameras ? 'hidden' : ''}" id="callUiCamSwitchBtn" title="Переключить камеру">🔄</button>
                     <button class="call-ui-control-btn ${this.isMobile ? 'hidden' : ''}" id="callUiScreenBtn" title="Демонстрация экрана">🖥️</button>
                     <button class="call-ui-control-btn hidden" id="callUiScreenAudioBtn" title="Звук экрана">🔊</button>
+                    <button class="call-ui-control-btn" id="callUiShareBtn" title="Поделиться">🔗</button>
                     <button class="call-ui-control-btn" id="callUiChatBtn" title="Чат">💬</button>
                     <button class="call-ui-control-btn" id="callUiParticipantsBtn" title="Участники">👥</button>
                     <button class="call-ui-control-btn danger" id="callUiHangupBtn" title="Завершить звонок">📵</button>
@@ -109,6 +114,10 @@ export class CallUI {
     bindEvents() {
         document.getElementById('callUiParticipantsClose').addEventListener('click', () => {
             this.hideParticipants();
+        });
+
+        document.getElementById('callUiParticipantsRefresh').addEventListener('click', () => {
+            this.callbacks.onRefreshParticipants?.();
         });
         document.getElementById('callUiHangupBtn').addEventListener('click', () => {
             this.callbacks.onHangup?.();
@@ -132,6 +141,10 @@ export class CallUI {
 
         document.getElementById('callUiScreenAudioBtn').addEventListener('click', () => {
             this.callbacks.onToggleScreenAudio?.();
+        });
+
+        document.getElementById('callUiShareBtn').addEventListener('click', () => {
+            this.callbacks.onShare?.();
         });
 
         document.getElementById('callUiChatBtn').addEventListener('click', () => {
@@ -225,6 +238,7 @@ export class CallUI {
         if (!this.uiVisible) {
             this.container.querySelector('.call-ui-header')?.classList.remove('hidden');
             this.container.querySelector('.call-ui-controls')?.classList.remove('hidden');
+            this.container.querySelector('.call-ui-volume-bar')?.classList.remove('hidden');
             this.uiVisible = true;
         }
         this.resetUIHideTimer();
@@ -235,6 +249,7 @@ export class CallUI {
 
         this.container.querySelector('.call-ui-header')?.classList.add('hidden');
         this.container.querySelector('.call-ui-controls')?.classList.add('hidden');
+        this.container.querySelector('.call-ui-volume-bar')?.classList.add('hidden');
         this.uiVisible = false;
     }
 
@@ -303,6 +318,8 @@ export class CallUI {
         }
         console.log('[CallUI] - this.remoteVideo exists:', !!this.remoteVideo);
 
+        this.remoteStreamsMap = remoteStreamsMap;
+
         const placeholder = document.getElementById('callUiRemoteVideoPlaceholder');
         
         const videoTracks = stream?.getVideoTracks().filter(t => t.readyState === 'live') || [];
@@ -319,11 +336,13 @@ export class CallUI {
                 this.updateGridView(remoteStreamsMap);
             } else {
                 this.updateSingleView(stream);
+                this.updateSingleViewVolumeControls();
             }
         } else if (!this.container.classList.contains('connected')) {
             this.container.classList.remove('connected');
             this.container.classList.add('connecting');
             if (placeholder) placeholder.style.display = 'flex';
+            this.hideVolumeControls();
         } else {
             if (placeholder) placeholder.style.display = 'none';
         }
@@ -346,6 +365,7 @@ export class CallUI {
         
         console.log('[CallUI] Stream tracks:', stream.getTracks().map(t => t.kind + ':' + t.id));
         this.remoteVideo.srcObject = stream;
+        this.remoteVideo.muted = true;
         console.log('[CallUI] Video srcObject:', this.remoteVideo.srcObject);
         console.log('[CallUI] Video srcObject tracks:', this.remoteVideo.srcObject?.getTracks().map(t => t.kind));
         console.log('[CallUI] After srcObject set, videoWidth:', this.remoteVideo.videoWidth, 'videoHeight:', this.remoteVideo.videoHeight);
@@ -428,7 +448,7 @@ export class CallUI {
             const video = document.createElement('video');
             video.autoplay = true;
             video.playsinline = true;
-            video.muted = false;
+            video.muted = true;
             video.style.cssText = 'width:100%;height:100%;object-fit:contain;background:#1a1a1a;display:block;';
 
             const peerStreamCopy = new MediaStream();
@@ -503,6 +523,7 @@ export class CallUI {
         if (!this.remoteVideo) return;
 
         this.remoteVideo.srcObject = stream;
+        this.remoteVideo.muted = true;
         this.remoteVideo.style.display = 'block';
         
         const placeholder = document.getElementById('callUiRemoteVideoPlaceholder');
@@ -559,6 +580,63 @@ export class CallUI {
         } else {
             btn.classList.remove('active');
             btn.textContent = '🔇';
+        }
+    }
+
+    updateSingleViewVolumeControls() {
+        if (!this.remoteStreamsMap || this.remoteStreamsMap.size <= 1) {
+            this.hideVolumeControls();
+            return;
+        }
+        
+        let volumeBar = this.container.querySelector('.call-ui-volume-bar');
+        if (!volumeBar) {
+            volumeBar = document.createElement('div');
+            volumeBar.className = 'call-ui-volume-bar';
+            volumeBar.innerHTML = `
+                <div class="volume-bar-header">
+                    <span>Громкость</span>
+                </div>
+                <div class="volume-bar-content"></div>
+            `;
+            this.container.querySelector('.call-ui-video-area').appendChild(volumeBar);
+        }
+        
+        const content = volumeBar.querySelector('.volume-bar-content');
+        content.innerHTML = '';
+        
+        for (const [peerId, stream] of this.remoteStreamsMap) {
+            const hasAudio = stream.getAudioTracks().some(t => t.readyState === 'live');
+            if (!hasAudio) continue;
+            
+            const volume = this.volumeManager?.getVolume(peerId) ?? 1.0;
+            const item = document.createElement('div');
+            item.className = 'volume-bar-item';
+            item.dataset.peerId = peerId;
+            item.innerHTML = `
+                <span class="volume-bar-name">${peerId.substring(0, 8)}</span>
+                <span class="volume-bar-icon">${volume === 0 ? '🔇' : '🔊'}</span>
+                <input type="range" class="volume-bar-slider" 
+                    min="0" max="100" value="${volume * 100}">
+                <span class="volume-bar-value">${Math.round(volume * 100)}</span>
+            `;
+            
+            const slider = item.querySelector('.volume-bar-slider');
+            slider.addEventListener('input', (e) => {
+                const vol = parseInt(e.target.value) / 100;
+                item.querySelector('.volume-bar-value').textContent = Math.round(vol * 100);
+                item.querySelector('.volume-bar-icon').textContent = vol === 0 ? '🔇' : '🔊';
+                this.callbacks.onVolumeChange?.(peerId, vol);
+            });
+            
+            content.appendChild(item);
+        }
+    }
+
+    hideVolumeControls() {
+        const volumeBar = this.container.querySelector('.call-ui-volume-bar');
+        if (volumeBar) {
+            volumeBar.remove();
         }
     }
 
@@ -661,6 +739,10 @@ export class CallUI {
         this.callbacks[event] = callback;
     }
 
+    setVolumeManager(volumeManager) {
+        this.volumeManager = volumeManager;
+    }
+
     updateParticipants(participants, localUUID) {
         if (!this.participantsList) return;
         
@@ -669,9 +751,33 @@ export class CallUI {
         for (const peerId of participants) {
             const item = document.createElement('div');
             item.className = 'call-ui-participant';
-            item.innerHTML = `
-                <span class="call-ui-participant-name">${peerId === localUUID ? 'Вы' : peerId.substring(0, 8)}</span>
-            `;
+            
+            if (peerId === localUUID) {
+                item.innerHTML = `
+                    <span class="call-ui-participant-name">Вы</span>
+                `;
+            } else {
+                const volume = this.volumeManager?.getVolume(peerId) ?? 1.0;
+                item.innerHTML = `
+                    <span class="call-ui-participant-name">${peerId.substring(0, 8)}</span>
+                    <div class="call-ui-participant-volume">
+                        <span class="volume-icon">🔊</span>
+                        <input type="range" class="volume-slider" 
+                            min="0" max="100" value="${volume * 100}" 
+                            data-peer-id="${peerId}">
+                        <span class="volume-value">${Math.round(volume * 100)}</span>
+                    </div>
+                `;
+                
+                const slider = item.querySelector('.volume-slider');
+                slider.addEventListener('input', (e) => {
+                    const vol = parseInt(e.target.value) / 100;
+                    item.querySelector('.volume-value').textContent = Math.round(vol * 100);
+                    item.querySelector('.volume-icon').textContent = vol === 0 ? '🔇' : '🔊';
+                    this.callbacks.onVolumeChange?.(peerId, vol);
+                });
+            }
+            
             this.participantsList.appendChild(item);
         }
     }
