@@ -48,6 +48,7 @@ body {
 .logo-icon {
     font-size: 64px;
     margin-bottom: 16px;
+    width: 100px;
 }
 
 h1 {
