@@ -20,9 +20,25 @@ export class CallUI {
         this.volumeManager = null;
         this.remoteStreamsMap = null;
         this.expandedPeerId = null;
+        this.isDarkMode = this.detectDarkMode();
+    }
+
+    detectDarkMode() {
+        return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    }
+
+    applyDarkMode() {
+        if (this.isDarkMode) {
+            document.documentElement.classList.add('dark-mode');
+        }
+    }
+
+    removeDarkMode() {
+        document.documentElement.classList.remove('dark-mode');
     }
 
     init() {
+        this.applyDarkMode();
         this.createElements();
         this.bindEvents();
         this.initDraggable();
@@ -273,6 +289,7 @@ export class CallUI {
         this.container.classList.remove('active');
         this.toggleChat(false);
         this.releaseWakeLock();
+        this.removeDarkMode();
 
         if (this.uiHideTimeout) {
             clearTimeout(this.uiHideTimeout);
@@ -314,33 +331,78 @@ export class CallUI {
         console.log('[CallUI] - this.remoteVideo exists:', !!this.remoteVideo);
 
         this.remoteStreamsMap = remoteStreamsMap;
+        this.updateRemoteDisplay();
+    }
 
+    updateRemoteDisplay() {
         const placeholder = document.getElementById('callUiRemoteVideoPlaceholder');
-        
-        const videoTracks = stream?.getVideoTracks().filter(t => t.readyState === 'live') || [];
-        const audioTracks = stream?.getAudioTracks().filter(t => t.readyState === 'live') || [];
-        const hasRemoteTracks = videoTracks.length > 0 || audioTracks.length > 0;
+        if (!placeholder) return;
 
-        if (hasRemoteTracks) {
-            this.container.classList.add('connected');
-            this.container.classList.remove('connecting');
-            if (placeholder) placeholder.style.display = 'none';
+        let hasAnyVideo = false;
+        let hasAnyAudio = false;
+        let hasMultiplePeers = false;
+        let primaryStream = null;
 
-            if (remoteStreamsMap && remoteStreamsMap.size > 1) {
-                console.log('[CallUI] Multiple peers, using grid view');
-                this.updateGridView(remoteStreamsMap);
-            } else {
-                this.updateSingleView(stream);
-                this.updateSingleViewVolumeControls();
+        if (this.remoteStreamsMap && this.remoteStreamsMap.size > 0) {
+            hasMultiplePeers = this.remoteStreamsMap.size > 1;
+            for (const [peerId, stream] of this.remoteStreamsMap) {
+                const videoTracks = stream.getVideoTracks().filter(t => t.readyState === 'live');
+                const audioTracks = stream.getAudioTracks().filter(t => t.readyState === 'live');
+
+                if (videoTracks.length > 0) {
+                    hasAnyVideo = true;
+                    primaryStream = stream;
+                }
+                if (audioTracks.length > 0) {
+                    hasAnyAudio = true;
+                }
             }
-        } else if (!this.container.classList.contains('connected')) {
+        }
+
+        if (!hasAnyVideo && !hasAnyAudio) {
             this.container.classList.remove('connected');
             this.container.classList.add('connecting');
-            if (placeholder) placeholder.style.display = 'flex';
+            placeholder.classList.remove('audio-only');
+            placeholder.innerHTML = `
+                <div class="placeholder-icon">📞</div>
+                <div class="placeholder-text">Ожидание подключения...</div>
+            `;
+            placeholder.style.display = 'flex';
             this.hideVolumeControls();
-        } else {
-            if (placeholder) placeholder.style.display = 'none';
+            return;
         }
+
+        this.container.classList.add('connected');
+        this.container.classList.remove('connecting');
+
+        if (!hasAnyVideo && hasAnyAudio) {
+            if (this.remoteVideo) {
+                this.remoteVideo.style.display = 'none';
+            }
+            placeholder.classList.add('audio-only');
+            placeholder.innerHTML = `
+                <div class="placeholder-icon" style="font-size: 48px; opacity: 0.8;">🎧</div>
+                <div class="placeholder-text">Участники в звонке</div>
+                <div class="placeholder-subtext">Только аудио</div>
+            `;
+            placeholder.style.display = 'flex';
+            return;
+        }
+
+        placeholder.style.display = 'none';
+        placeholder.classList.remove('audio-only');
+
+        if (this.remoteVideo) {
+            this.remoteVideo.style.display = 'block';
+        }
+
+        if (hasMultiplePeers) {
+            console.log('[CallUI] Multiple peers, using grid view');
+            this.updateGridView(this.remoteStreamsMap);
+        } else if (primaryStream) {
+            this.updateSingleView(primaryStream);
+        }
+        this.updateSingleViewVolumeControls();
     }
 
     updateSingleView(stream) {
@@ -413,6 +475,23 @@ export class CallUI {
         }
 
         const count = validStreams.length;
+        const hasAudioOnly = remoteStreamsMap.size > 0 && count === 0;
+
+        if (hasAudioOnly) {
+            const placeholder = document.getElementById('callUiRemoteVideoPlaceholder');
+            wrapper.innerHTML = '';
+            if (placeholder) {
+                placeholder.classList.add('audio-only');
+                placeholder.innerHTML = `
+                    <div class="placeholder-icon" style="font-size: 48px; opacity: 0.8;">🎧</div>
+                    <div class="placeholder-text">Участники в звонке</div>
+                    <div class="placeholder-subtext">Только аудио</div>
+                `;
+                placeholder.style.display = 'flex';
+            }
+            return;
+        }
+
         if (count === 0) {
             wrapper.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:rgba(255,255,255,0.5);">Нет видео</div>';
             return;

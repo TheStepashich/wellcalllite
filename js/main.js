@@ -343,6 +343,16 @@ class WellCallApp {
                         this.roomParticipants.add(memberId);
                     }
                 }
+
+                if (!this.callUI) {
+                    this.createCallUI();
+                }
+
+                for (const memberId of msg.roomMembers) {
+                    if (memberId !== this.uuid && !this.peers.has(memberId)) {
+                        setTimeout(() => this.startCallWithOffer(memberId), 500);
+                    }
+                }
             }
 
             this.presenceAckSent.add(fromUUID);

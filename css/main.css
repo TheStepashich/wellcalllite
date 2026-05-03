@@ -11,6 +11,19 @@
     --shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
 }
 
+html.dark-mode {
+    --primary-color: #5a9ee9;
+    --primary-hover: #4a8dc9;
+    --success-color: #37be70;
+    --danger-color: #f75c4c;
+    --bg-color: #0a0a0a;
+    --card-bg: #1a1a1a;
+    --text-primary: #f0f0f0;
+    --text-secondary: #a0a0a0;
+    --border-color: #333333;
+    --shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+}
+
 * {
     margin: 0;
     padding: 0;
@@ -205,7 +218,7 @@ h1 {
     left: 0;
     right: 0;
     bottom: 0;
-    background: #000;
+    background: var(--bg-primary, #000);
     z-index: 1000;
 }
 
