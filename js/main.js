@@ -348,9 +348,11 @@ class WellCallApp {
                     this.createCallUI();
                 }
 
+                // Don't create offer back to owner - owner already creates offer for us
+                // Just add owner to participants list
                 for (const memberId of msg.roomMembers) {
-                    if (memberId !== this.uuid && !this.peers.has(memberId)) {
-                        setTimeout(() => this.startCallWithOffer(memberId), 500);
+                    if (memberId !== this.uuid && !this.roomParticipants.has(memberId)) {
+                        this.roomParticipants.add(memberId);
                     }
                 }
             }

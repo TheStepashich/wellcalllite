@@ -307,9 +307,44 @@ export class WebRTCHandler {
             }
         }
 
-        if (this.pc) {
-            console.log('[WebRTC] Closing existing connection for new call');
-            this.pc.close();
+        if (this.pc && this.pc.signalingState === 'have-local-offer') {
+            console.log('[WebRTC] Glare detected (have-local-offer), rolling back our offer to accept incoming');
+            try {
+                await this.pc.setLocalDescription({ type: 'rollback' });
+                console.log('[WebRTC] Rollback complete, accepting incoming offer on existing connection');
+
+                await this.pc.setRemoteDescription(msg.data);
+                console.log('[WebRTC] Remote description set, state:', this.pc.signalingState);
+
+                const answer = await this.pc.createAnswer();
+                await this.pc.setLocalDescription(answer);
+
+                this.signaling.send({
+                    type: 'answer',
+                    to: msg.from,
+                    from: this.uuid,
+                    data: answer
+                });
+
+                setTimeout(async () => {
+                    for (const candidate of this.pendingICE) {
+                        try {
+                            await this.pc.addIceCandidate(candidate);
+                        } catch (e) {
+                            if (!e.message.includes('Unknown ufrag') && !e.message.includes('closed')) {
+                                console.warn('[WebRTC] ICE add failed:', e.message);
+                            }
+                        }
+                    }
+                    this.pendingICE = [];
+                }, 100);
+
+                return;
+            } catch (e) {
+                console.warn('[WebRTC] Glare resolution failed, recreating connection:', e);
+                this.pc.close();
+                this.pc = null;
+            }
         }
 
         this.sentMyKey = false;

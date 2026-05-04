@@ -377,6 +377,18 @@ export class CallUI {
 
         if (!hasAnyVideo && hasAnyAudio) {
             if (this.remoteVideo) {
+                for (const [peerId, stream] of this.remoteStreamsMap) {
+                    const audioTracks = stream.getAudioTracks().filter(t => t.readyState === 'live');
+                    if (audioTracks.length > 0) {
+                        const audioStream = new MediaStream();
+                        for (const track of audioTracks) {
+                            audioStream.addTrack(track);
+                        }
+                        this.remoteVideo.srcObject = audioStream;
+                        this.remoteVideo.play().catch(() => {});
+                        break;
+                    }
+                }
                 this.remoteVideo.style.display = 'none';
             }
             placeholder.classList.add('audio-only');
