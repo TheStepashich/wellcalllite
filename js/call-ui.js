@@ -184,15 +184,16 @@ export class CallUI {
             this.toggleFullscreen();
         });
 
-        document.addEventListener('fullscreenchange', () => {
+        this._fullscreenChangeHandler = () => {
             this.isFullscreen = !!document.fullscreenElement;
-        });
+        };
+        document.addEventListener('fullscreenchange', this._fullscreenChangeHandler);
     }
 
     initDraggable() {
         const wrapper = this.localVideoWrapper;
 
-        const onStart = (e) => {
+        this._dragStartHandler = (e) => {
             const clientX = e.touches ? e.touches[0].clientX : e.clientX;
             const clientY = e.touches ? e.touches[0].clientY : e.clientY;
 
@@ -208,7 +209,7 @@ export class CallUI {
             wrapper.classList.add('dragging');
         };
 
-        const onMove = (e) => {
+        this._dragMoveHandler = (e) => {
             if (!this.dragState?.isDragging) return;
 
             const clientX = e.touches ? e.touches[0].clientX : e.clientX;
@@ -223,20 +224,20 @@ export class CallUI {
             wrapper.style.bottom = 'auto';
         };
 
-        const onEnd = () => {
+        this._dragEndHandler = () => {
             if (this.dragState?.isDragging) {
                 this.dragState.isDragging = false;
                 wrapper.classList.remove('dragging');
             }
         };
 
-        wrapper.addEventListener('mousedown', onStart);
-        document.addEventListener('mousemove', onMove);
-        document.addEventListener('mouseup', onEnd);
+        wrapper.addEventListener('mousedown', this._dragStartHandler);
+        document.addEventListener('mousemove', this._dragMoveHandler);
+        document.addEventListener('mouseup', this._dragEndHandler);
 
-        wrapper.addEventListener('touchstart', onStart, { passive: true });
-        document.addEventListener('touchmove', onMove, { passive: true });
-        document.addEventListener('touchend', onEnd);
+        wrapper.addEventListener('touchstart', this._dragStartHandler, { passive: true });
+        document.addEventListener('touchmove', this._dragMoveHandler, { passive: true });
+        document.addEventListener('touchend', this._dragEndHandler);
     }
 
     bindActivityEvents() {
@@ -308,7 +309,11 @@ export class CallUI {
 
     async releaseWakeLock() {
         if (this.wakeLock) {
-            await this.wakeLock.release();
+            try {
+                await this.wakeLock.release();
+            } catch (e) {
+                console.warn('[CallUI] Wake lock release failed:', e);
+            }
             this.wakeLock = null;
         }
     }
@@ -466,20 +471,28 @@ export class CallUI {
 
         console.log('[CallUI] updateGridView called');
 
-        const originalVideo = this.remoteVideo;
-        const originalPlaceholder = document.getElementById('callUiRemoteVideoPlaceholder');
+        if (this.remoteVideo) {
+            this.remoteVideo.style.display = 'none';
+        }
 
-        wrapper.innerHTML = '';
+        const placeholder = document.getElementById('callUiRemoteVideoPlaceholder');
+        if (placeholder) {
+            placeholder.style.display = 'none';
+        }
+
+        const existingGridVideos = wrapper.querySelectorAll('.grid-video-wrapper');
+        existingGridVideos.forEach(v => v.remove());
+
         wrapper.style.position = 'relative';
         wrapper.style.width = '100%';
         wrapper.style.height = '100%';
 
         const validStreams = [];
         for (const [peerId, peerStream] of remoteStreamsMap) {
-            const videoTrack = peerStream.getVideoTracks().find(t => t.readyState === 'live');
-            const audioTrack = peerStream.getAudioTracks().find(t => t.readyState === 'live');
-            const hasVideo = videoTrack && videoTrack.getSettings().width > 0 && videoTrack.getSettings().height > 0;
-            const hasAudio = !!audioTrack;
+            const videoTracks = peerStream.getVideoTracks().filter(t => t.readyState === 'live');
+            const audioTracks = peerStream.getAudioTracks().filter(t => t.readyState === 'live');
+            const hasVideo = videoTracks.length > 0;
+            const hasAudio = audioTracks.length > 0;
             
             if (hasVideo || hasAudio) {
                 validStreams.push([peerId, peerStream, hasVideo]);
@@ -490,8 +503,6 @@ export class CallUI {
         const hasAudioOnly = remoteStreamsMap.size > 0 && count === 0;
 
         if (hasAudioOnly) {
-            const placeholder = document.getElementById('callUiRemoteVideoPlaceholder');
-            wrapper.innerHTML = '';
             if (placeholder) {
                 placeholder.classList.add('audio-only');
                 placeholder.innerHTML = `
@@ -528,6 +539,7 @@ export class CallUI {
             console.log('[CallUI] Grid: creating video for peer:', peerId.substring(0, 8), 'tracks:', peerStream.getTracks().map(t => t.kind));
             
             const videoWrapper = document.createElement('div');
+            videoWrapper.className = 'grid-video-wrapper';
             videoWrapper.style.cssText = 'position:relative;background:#1a1a1a;border-radius:8px;overflow:hidden;cursor:pointer;';
             videoWrapper.dataset.peerId = peerId;
 
@@ -563,11 +575,6 @@ export class CallUI {
             videoWrapper.addEventListener('click', () => {
                 this.toggleExpandedVideo(peerId);
             });
-        }
-
-        this.remoteVideo = originalVideo;
-        if (originalPlaceholder) {
-            originalPlaceholder.id = 'callUiRemoteVideoPlaceholder';
         }
     }
 
@@ -871,6 +878,18 @@ export class CallUI {
         if (this.uiHideTimeout) {
             clearTimeout(this.uiHideTimeout);
         }
+
+        const wrapper = this.localVideoWrapper;
+        if (wrapper) {
+            wrapper.removeEventListener('mousedown', this._dragStartHandler);
+            wrapper.removeEventListener('touchstart', this._dragStartHandler);
+        }
+        document.removeEventListener('mousemove', this._dragMoveHandler);
+        document.removeEventListener('mouseup', this._dragEndHandler);
+        document.removeEventListener('touchmove', this._dragMoveHandler);
+        document.removeEventListener('touchend', this._dragEndHandler);
+        document.removeEventListener('fullscreenchange', this._fullscreenChangeHandler);
+
         if (this.container?.parentNode) {
             this.container.parentNode.removeChild(this.container);
         }

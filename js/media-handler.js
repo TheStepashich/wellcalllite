@@ -3,6 +3,8 @@ export class MediaHandler {
         this.localStream = null;
         this.screenStream = null;
         this.blackVideoTrack = null;
+        this.blackVideoCanvas = null;
+        this.blackVideoAnimFrameId = null;
         this.isAudioEnabled = true;
         this.isVideoEnabled = false;
         this.isScreenSharing = false;
@@ -171,11 +173,21 @@ export class MediaHandler {
             return this.blackVideoTrack;
         }
 
+        if (this.blackVideoCanvas) {
+            this.blackVideoCanvas.remove();
+        }
+
+        if (this.blackVideoAnimFrameId) {
+            cancelAnimationFrame(this.blackVideoAnimFrameId);
+            this.blackVideoAnimFrameId = null;
+        }
+
         const canvas = document.createElement('canvas');
         canvas.width = 640;
         canvas.height = 480;
         canvas.style.display = 'none';
         document.body.appendChild(canvas);
+        this.blackVideoCanvas = canvas;
 
         const ctx = canvas.getContext('2d');
         ctx.fillStyle = '#000000';
@@ -188,7 +200,7 @@ export class MediaHandler {
         const animate = () => {
             if (this.blackVideoTrack && this.blackVideoTrack.readyState === 'live') {
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
-                requestAnimationFrame(animate);
+                this.blackVideoAnimFrameId = requestAnimationFrame(animate);
             }
         };
         animate();
@@ -250,6 +262,21 @@ export class MediaHandler {
         if (this.localStream) {
             this.localStream.getTracks().forEach(t => t.stop());
             this.localStream = null;
+        }
+
+        if (this.blackVideoAnimFrameId) {
+            cancelAnimationFrame(this.blackVideoAnimFrameId);
+            this.blackVideoAnimFrameId = null;
+        }
+
+        if (this.blackVideoCanvas) {
+            this.blackVideoCanvas.remove();
+            this.blackVideoCanvas = null;
+        }
+
+        if (this.blackVideoTrack) {
+            this.blackVideoTrack.stop();
+            this.blackVideoTrack = null;
         }
 
         this.isAudioEnabled = true;

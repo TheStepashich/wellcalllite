@@ -30,6 +30,7 @@ class WellCallApp {
         this.isScreenAudioEnabled = false;
         this.hasMultipleCameras = false;
         this.isMobile = false;
+        this.screenShareInProgress = false;
 
         this.elements = {};
     }
@@ -256,6 +257,17 @@ class WellCallApp {
             case 'pong':
                 break;
 
+            case 'signaling-reconnected':
+                console.log('[App] Signaling reconnected, re-registering with room');
+                if (this.roomId) {
+                    this.signaling.send({
+                        type: 'presence',
+                        status: 'online',
+                        roomId: this.roomId
+                    });
+                }
+                break;
+
             case 'presence':
                 this.handlePresence(msg);
                 break;
@@ -480,7 +492,7 @@ class WellCallApp {
                 type: 'group-room-member-joined',
                 to: peerId,
                 from: this.uuid,
-                newMemberId: msg.roomId,
+                newMemberId: this.uuid,
                 roomId: this.roomId
             });
         }
@@ -789,6 +801,11 @@ class WellCallApp {
             return;
         }
 
+        if (this.screenShareInProgress) {
+            console.log('[App] Screen share operation already in progress');
+            return;
+        }
+
         if (this.media.isScreenSharing) {
             await this.stopScreenShare();
         } else {
@@ -797,11 +814,17 @@ class WellCallApp {
     }
 
     async startScreenShare() {
+        if (this.screenShareInProgress) return;
+        this.screenShareInProgress = true;
+
         try {
             this.media.onScreenShareEnded = () => this.handleScreenShareEnded();
 
             const screenTrack = await this.media.startScreenShare();
-            if (!screenTrack) return;
+            if (!screenTrack) {
+                this.screenShareInProgress = false;
+                return;
+            }
 
             const screenStream = this.media.getScreenStream();
             const screenAudioTrack = this.media.getScreenAudioTrack();
@@ -821,19 +844,24 @@ class WellCallApp {
             if (error.name === 'NotAllowedError') {
                 alert('Доступ к демонстрации экрана запрещён');
             }
+        } finally {
+            this.screenShareInProgress = false;
         }
     }
 
-    handleScreenShareEnded() {
+    async handleScreenShareEnded() {
         console.log('[App] Screen share ended by user');
 
         this.media.onScreenShareEnded = null;
 
+        const audioTrack = this.media.getAudioTrackSync();
+
         for (const peer of this.peers.values()) {
-            peer.removeScreenTrack();
+            await peer.removeScreenTrack(audioTrack);
         }
 
         this.media.stopScreenShare();
+        this.screenShareInProgress = false;
 
         const stream = this.getLocalStream();
         if (this.callUI) {
@@ -843,19 +871,26 @@ class WellCallApp {
     }
 
     async stopScreenShare() {
-        this.media.onScreenShareEnded = null;
-        const audioTrack = this.media.getAudioTrackSync();
+        if (this.screenShareInProgress) return;
+        this.screenShareInProgress = true;
 
-        for (const peer of this.peers.values()) {
-            await peer.removeScreenTrack(audioTrack);
-        }
+        try {
+            this.media.onScreenShareEnded = null;
+            const audioTrack = this.media.getAudioTrackSync();
 
-        this.media.stopScreenShare();
+            for (const peer of this.peers.values()) {
+                await peer.removeScreenTrack(audioTrack);
+            }
 
-        const stream = this.getLocalStream();
-        if (this.callUI) {
-            this.callUI.setLocalStream(stream);
-            this.callUI.updateScreenState(false);
+            this.media.stopScreenShare();
+
+            const stream = this.getLocalStream();
+            if (this.callUI) {
+                this.callUI.setLocalStream(stream);
+                this.callUI.updateScreenState(false);
+            }
+        } finally {
+            this.screenShareInProgress = false;
         }
     }
 
@@ -886,15 +921,6 @@ class WellCallApp {
             });
         } else {
             prompt('Скопируйте ссылку:', link);
-        }
-    }
-
-    sendMessage(text) {
-        for (const peer of this.peers.values()) {
-            peer.sendMessage(text);
-        }
-        if (this.peers.size > 0 && this.callUI) {
-            this.callUI.addMessage(text, true);
         }
     }
 
@@ -1010,6 +1036,15 @@ class WellCallApp {
         this.peers.clear();
 
         this.media.stopAllTracks();
+
+        if (this.volumeManager) {
+            this.volumeManager.destroy();
+        }
+
+        if (this.signaling) {
+            this.signaling.close();
+            this.signaling = null;
+        }
 
         this.isInCall = false;
         this.incomingCall = null;

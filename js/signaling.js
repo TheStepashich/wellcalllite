@@ -42,15 +42,21 @@ export class Signaling {
                 const msg = JSON.parse(e.data);
 
                 if (msg.type === 'registered' && msg.status === 'success') {
+                    const wasPreviouslyRegistered = this.registered;
                     this.registered = true;
                     this.reconnectAttempts = 0;
                     this.flushQueue();
+
+                    if (wasPreviouslyRegistered) {
+                        this.onMessage?.({ type: 'signaling-reconnected' });
+                    }
                 }
 
                 const ignoreOwnSession = msg.session_id === this.sessionId;
                 const systemTypes = [
                     'registered', 'pong', 'presence',
-                    'group-room-member-joined', 'group-call-leave'
+                    'group-room-member-joined', 'group-call-leave',
+                    'signaling-reconnected'
                 ];
 
                 if (!ignoreOwnSession || systemTypes.includes(msg.type)) {

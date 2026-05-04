@@ -23,6 +23,18 @@ export class WebRTCHandler {
         this.maxRetries = 3;
         this.retryDelay = 2000;
         this.offerGeneration = 0;
+        this.operationLock = null;
+    }
+
+    async acquireLock() {
+        while (this.operationLock) {
+            await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        this.operationLock = true;
+    }
+
+    releaseLock() {
+        this.operationLock = null;
     }
 
     createPeerConnection() {
@@ -37,7 +49,14 @@ export class WebRTCHandler {
         this.pc.oniceconnectionstatechange = () => {
             const state = this.pc.iceConnectionState;
             console.log('[WebRTC] ICE state:', state);
-            this.onConnectionStateChange?.(state);
+
+            if (state === 'disconnected') {
+                console.log('[WebRTC] ICE disconnected, waiting for recovery...');
+            }
+
+            if (state === 'failed') {
+                console.log('[WebRTC] ICE failed, triggering connection retry...');
+            }
         };
 
         this.pc.onicecandidate = (event) => {
@@ -88,6 +107,12 @@ export class WebRTCHandler {
             this.isConnected = state === 'connected';
             this.onConnectionStateChange?.(state);
 
+            if (state === 'disconnected' && this.retryCount < this.maxRetries) {
+                console.log('[WebRTC] Connection disconnected, scheduling ICE restart...');
+                setTimeout(() => this.restartICE(), this.retryDelay);
+                this.retryDelay *= 1.5;
+            }
+
             if (state === 'failed' && this.retryCount < this.maxRetries) {
                 this.retryCount++;
                 console.log(`[WebRTC] Connection failed, retry ${this.retryCount}/${this.maxRetries} in ${this.retryDelay}ms`);
@@ -99,11 +124,35 @@ export class WebRTCHandler {
         return this.pc;
     }
 
+    async restartICE() {
+        if (!this.pc || this.pc.connectionState === 'connected') return;
+
+        console.log('[WebRTC] Attempting ICE restart...');
+        try {
+            if (this.pc.signalingState === 'stable') {
+                const offer = await this.pc.createOffer({ iceRestart: true });
+                await this.pc.setLocalDescription(offer);
+                this.signaling.send({
+                    type: 'offer',
+                    to: this.targetUUID,
+                    from: this.uuid,
+                    data: offer
+                });
+                console.log('[WebRTC] ICE restart offer sent');
+            } else {
+                console.log('[WebRTC] Cannot ICE restart, signaling state:', this.pc.signalingState);
+            }
+        } catch (e) {
+            console.warn('[WebRTC] ICE restart failed:', e);
+        }
+    }
+
     async retryConnection() {
         if (!this.targetUUID) return;
 
         this.retryCount++;
         this.offerGeneration++;
+        this.receivedPeerKey = false;
         
         console.log('[WebRTC] Retrying connection, attempt:', this.retryCount, 'generation:', this.offerGeneration);
 
@@ -121,11 +170,16 @@ export class WebRTCHandler {
             } catch (e) {}
         }
 
-        await this.sendMyKey();
+        await this.ensureAudio();
 
         const audioTrack = this.localStream?.getAudioTracks()?.[0];
         if (audioTrack) {
             this.pc.addTrack(audioTrack, this.localStream);
+        }
+
+        const videoTrack = this.localStream?.getVideoTracks()?.[0];
+        if (videoTrack && videoTrack.readyState === 'live') {
+            this.pc.addTrack(videoTrack, this.localStream);
         }
 
         this.dataChannel = this.pc.createDataChannel('chat');
@@ -183,6 +237,15 @@ export class WebRTCHandler {
     }
 
     async createOffer(targetUUID) {
+        await this.acquireLock();
+        try {
+            return await this._createOffer(targetUUID);
+        } finally {
+            this.releaseLock();
+        }
+    }
+
+    async _createOffer(targetUUID) {
         this.targetUUID = targetUUID;
         this.offerGeneration++;
         this.sentMyKey = false;
@@ -262,59 +325,129 @@ export class WebRTCHandler {
     }
 
     async handleOffer(msg) {
+        await this.acquireLock();
+        try {
+            await this._handleOffer(msg);
+        } finally {
+            this.releaseLock();
+        }
+    }
+
+    async _handleOffer(msg) {
         this.targetUUID = msg.from;
 
-        const isRenegotiation = this.pc && 
-                                this.pc.signalingState === 'stable' && 
-                                this.pc.remoteDescription && 
-                                this.pc.connectionState === 'connected';
+        const hasExistingConnection = this.pc && 
+                                      this.pc.remoteDescription && 
+                                      (this.pc.connectionState === 'connected' || 
+                                       this.pc.connectionState === 'connecting' || 
+                                       this.pc.connectionState === 'new');
 
-        if (isRenegotiation) {
-            console.log('[WebRTC] Renegotiation offer received, processing...');
-            
-            try {
-                await this.pc.setRemoteDescription(msg.data);
-                console.log('[WebRTC] Renegotiation: remote description set');
+        if (hasExistingConnection) {
+            const state = this.pc.signalingState;
+            console.log('[WebRTC] Existing connection, state:', state, 'connection:', this.pc.connectionState);
 
-                const answer = await this.pc.createAnswer();
-                await this.pc.setLocalDescription(answer);
+            if (state === 'stable') {
+                console.log('[WebRTC] Renegotiation offer received (stable), processing...');
+                try {
+                    await this.pc.setRemoteDescription(msg.data);
+                    const answer = await this.pc.createAnswer();
+                    await this.pc.setLocalDescription(answer);
 
-                console.log('[WebRTC] Renegotiation answer created, sending...');
+                    this.signaling.send({
+                        type: 'answer',
+                        to: msg.from,
+                        from: this.uuid,
+                        data: answer
+                    });
 
-                this.signaling.send({
-                    type: 'answer',
-                    to: msg.from,
-                    from: this.uuid,
-                    data: answer
-                });
-
-                setTimeout(async () => {
-                    for (const candidate of this.pendingICE) {
-                        try {
-                            await this.pc.addIceCandidate(candidate);
-                        } catch (e) {
-                            if (!e.message.includes('Unknown ufrag') && !e.message.includes('closed')) {
-                                console.warn('[WebRTC] ICE add failed:', e.message);
+                    setTimeout(async () => {
+                        for (const candidate of this.pendingICE) {
+                            try {
+                                await this.pc.addIceCandidate(candidate);
+                            } catch (e) {
+                                if (!e.message.includes('Unknown ufrag') && !e.message.includes('closed')) {
+                                    console.warn('[WebRTC] ICE add failed:', e.message);
+                                }
                             }
                         }
-                    }
-                    this.pendingICE = [];
-                }, 100);
-
-                return;
-            } catch (e) {
-                console.error('[WebRTC] Renegotiation failed:', e);
+                        this.pendingICE = [];
+                    }, 100);
+                    return;
+                } catch (e) {
+                    console.error('[WebRTC] Renegotiation (stable) failed:', e);
+                }
             }
+
+            if (state === 'have-local-offer') {
+                console.log('[WebRTC] Glare during renegotiation, rolling back...');
+                try {
+                    await this.pc.setLocalDescription({ type: 'rollback' });
+                    await this.pc.setRemoteDescription(msg.data);
+
+                    const answer = await this.pc.createAnswer();
+                    await this.pc.setLocalDescription(answer);
+
+                    this.signaling.send({
+                        type: 'answer',
+                        to: msg.from,
+                        from: this.uuid,
+                        data: answer
+                    });
+
+                    setTimeout(async () => {
+                        for (const candidate of this.pendingICE) {
+                            try {
+                                await this.pc.addIceCandidate(candidate);
+                            } catch (e) {
+                                if (!e.message.includes('Unknown ufrag') && !e.message.includes('closed')) {
+                                    console.warn('[WebRTC] ICE add failed:', e.message);
+                                }
+                            }
+                        }
+                        this.pendingICE = [];
+                    }, 100);
+                    return;
+                } catch (e) {
+                    console.error('[WebRTC] Glare resolution failed:', e);
+                }
+            }
+
+            if (state === 'have-remote-offer') {
+                console.log('[WebRTC] Already have remote offer, updating...');
+                try {
+                    await this.pc.setRemoteDescription(msg.data);
+
+                    const answer = await this.pc.createAnswer();
+                    await this.pc.setLocalDescription(answer);
+
+                    this.signaling.send({
+                        type: 'answer',
+                        to: msg.from,
+                        from: this.uuid,
+                        data: answer
+                    });
+                    return;
+                } catch (e) {
+                    console.error('[WebRTC] Failed to update remote offer:', e);
+                }
+            }
+
+            if (state === 'closed') {
+                console.log('[WebRTC] Connection closed, recreating...');
+                this.pc.close();
+                this.pc = null;
+            }
+
+            console.log('[WebRTC] Could not handle offer on existing connection (state:', state, '), skipping to avoid destroying connection');
+            return;
         }
 
         if (this.pc && this.pc.signalingState === 'have-local-offer') {
             console.log('[WebRTC] Glare detected (have-local-offer), rolling back our offer to accept incoming');
             try {
                 await this.pc.setLocalDescription({ type: 'rollback' });
-                console.log('[WebRTC] Rollback complete, accepting incoming offer on existing connection');
 
                 await this.pc.setRemoteDescription(msg.data);
-                console.log('[WebRTC] Remote description set, state:', this.pc.signalingState);
 
                 const answer = await this.pc.createAnswer();
                 await this.pc.setLocalDescription(answer);
@@ -338,7 +471,6 @@ export class WebRTCHandler {
                     }
                     this.pendingICE = [];
                 }, 100);
-
                 return;
             } catch (e) {
                 console.warn('[WebRTC] Glare resolution failed, recreating connection:', e);
@@ -346,6 +478,8 @@ export class WebRTCHandler {
                 this.pc = null;
             }
         }
+
+        console.log('[WebRTC] No existing connection, creating new one for incoming offer');
 
         this.sentMyKey = false;
         this.receivedPeerKey = false;
@@ -407,6 +541,15 @@ export class WebRTCHandler {
     }
 
     async handleAnswer(msg) {
+        await this.acquireLock();
+        try {
+            await this._handleAnswer(msg);
+        } finally {
+            this.releaseLock();
+        }
+    }
+
+    async _handleAnswer(msg) {
         if (!this.pc) {
             console.warn('[WebRTC] No peer connection for answer');
             return;
@@ -563,12 +706,15 @@ export class WebRTCHandler {
         }
     }
 
-    flushMessageQueue() {
+    async flushMessageQueue() {
         const messages = [...this.messageQueue];
         this.messageQueue = [];
 
         for (const text of messages) {
-            this.sendMessage(text);
+            const sent = await this.sendMessage(text);
+            if (!sent) {
+                this.messageQueue.push(text);
+            }
         }
     }
 
@@ -598,101 +744,138 @@ export class WebRTCHandler {
         }
     }
 
-    async renegotiate() {
-        if (!this.pc || !this.targetUUID) return;
-
-        if (this.pc.signalingState !== 'stable') {
-            console.log('[WebRTC] Not stable, waiting...');
-            await this.waitForStableState(5000);
+    async renegotiate(maxRetries = 2) {
+        if (!this.pc || !this.targetUUID) {
+            console.log('[WebRTC] Cannot renegotiate: no pc or target');
+            return false;
         }
 
-        if (this.pc.signalingState !== 'stable') {
-            console.log('[WebRTC] Still not stable, skipping renegotiation');
-            return;
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+            if (attempt > 0) {
+                console.log(`[WebRTC] Renegotiate retry ${attempt}/${maxRetries}`);
+                await new Promise(resolve => setTimeout(resolve, 500));
+            }
+
+            if (this.pc.signalingState === 'have-local-offer') {
+                console.log('[WebRTC] Renegotiate: have-local-offer, rolling back...');
+                try {
+                    await this.pc.setLocalDescription({ type: 'rollback' });
+                } catch (e) {
+                    console.error('[WebRTC] Renegotiate rollback failed:', e);
+                    continue;
+                }
+            }
+
+            if (this.pc.signalingState !== 'stable') {
+                console.log('[WebRTC] Renegotiate: state is', this.pc.signalingState, ', waiting...');
+                await this.waitForStableState(3000);
+            }
+
+            if (this.pc.signalingState !== 'stable') {
+                console.log('[WebRTC] Renegotiate: still not stable (', this.pc.signalingState, ')');
+                continue;
+            }
+
+            try {
+                const senders = this.pc.getSenders();
+                console.log('[WebRTC] Renegotiate, senders:', senders.map(s => s.track?.kind + ':' + s.track?.id?.substring(0, 8)));
+
+                const offer = await this.pc.createOffer();
+                await this.pc.setLocalDescription(offer);
+
+                console.log('[WebRTC] Renegotiation offer sent, has video:', offer.sdp?.includes('m=video'));
+
+                this.signaling.send({
+                    type: 'offer',
+                    to: this.targetUUID,
+                    from: this.uuid,
+                    data: offer
+                });
+                return true;
+            } catch (error) {
+                console.error('[WebRTC] Renegotiation failed:', error);
+                continue;
+            }
         }
 
-        try {
-            const senders = this.pc.getSenders();
-            console.log('[WebRTC] Renegotiate, senders:', senders.map(s => s.track?.kind + ':' + s.track?.id?.substring(0, 8)));
-
-            const offer = await this.pc.createOffer();
-            await this.pc.setLocalDescription(offer);
-
-            console.log('[WebRTC] Renegotiation offer sent, has video:', offer.sdp?.includes('m=video'));
-            console.log('[WebRTC] SDP video part:', offer.sdp?.match(/m=video[\s\S]*?(?=m=|$)/)?.[0]);
-
-            this.signaling.send({
-                type: 'offer',
-                to: this.targetUUID,
-                from: this.uuid,
-                data: offer
-            });
-        } catch (error) {
-            console.error('[WebRTC] Renegotiation failed:', error);
-        }
+        console.error('[WebRTC] Renegotiation failed after', maxRetries, 'retries');
+        return false;
     }
 
     async addScreenTrack(screenTrack, screenStream, screenAudioTrack = null) {
-        if (!this.pc) return;
+        if (!this.pc) {
+            console.log('[WebRTC] addScreenTrack: no peer connection');
+            return false;
+        }
 
-        const senders = this.pc.getSenders();
-        console.log('[WebRTC] addScreenTrack, current senders:', senders.map(s => s.track?.kind + ':' + s.track?.id?.substring(0, 8)));
-        console.log('[WebRTC] addScreenTrack, screenTrack:', screenTrack.id, 'label:', screenTrack.label, 'settings:', screenTrack.getSettings());
+        this.screenShareTrack = screenTrack;
 
-        const videoSender = senders.find(s => s.track?.kind === 'video');
-        
-        screenTrack.addEventListener('ended', () => {
+        screenTrack.addEventListener('ended', async () => {
             console.log('[WebRTC] Screen track ended event');
-            this.removeScreenTrack();
+            await this.removeScreenTrack();
         });
-        
-        if (videoSender) {
-            console.log('[WebRTC] Replacing video track for screen share');
-            await videoSender.replaceTrack(screenTrack);
-            
-            const transceivers = this.pc.getTransceivers();
-            console.log('[WebRTC] Transceivers:', transceivers.map(t => t.mid + ':' + t.direction));
-            
-            const videoTransceiver = transceivers.find(t => t.sender === videoSender);
-            if (videoTransceiver) {
-                console.log('[WebRTC] Video transceiver currentDirection:', videoTransceiver.currentDirection);
-                if (videoTransceiver.currentDirection === 'sendrecv') {
-                    videoTransceiver.direction = 'sendonly';
-                }
-                console.log('[WebRTC] Set transceiver direction');
-            }
+
+        const transceivers = this.pc.getTransceivers();
+        const videoTransceiver = transceivers.find(t => t.sender.track?.kind === 'video');
+
+        if (videoTransceiver) {
+            console.log('[WebRTC] Screen share: existing video transceiver', videoTransceiver.mid, 'direction:', videoTransceiver.direction, 'current:', videoTransceiver.currentDirection);
+
+            this.savedVideoTrack = videoTransceiver.sender.track;
+
+            videoTransceiver.direction = 'sendrecv';
+
+            await videoTransceiver.sender.replaceTrack(screenTrack);
+            console.log('[WebRTC] Screen track replaced, direction set to sendrecv');
         } else {
-            console.log('[WebRTC] Adding screen track');
-            this.pc.addTrack(screenTrack, screenStream);
+            console.log('[WebRTC] Screen share: adding new video transceiver');
+            videoTransceiver = this.pc.addTransceiver(screenTrack, { direction: 'sendrecv' });
         }
 
         if (screenAudioTrack?.readyState === 'live') {
-            const audioSender = senders.find(s => s.track?.kind === 'audio' && s.track?.label?.toLowerCase().includes('screen'));
-            if (audioSender) {
-                console.log('[WebRTC] Replacing screen audio track');
-                await audioSender.replaceTrack(screenAudioTrack);
+            const audioSenders = this.pc.getSenders().filter(s => s.track?.kind === 'audio');
+            const screenAudioSender = audioSenders.find(s => s.track?.label?.toLowerCase().includes('screen'));
+            if (screenAudioSender) {
+                await screenAudioSender.replaceTrack(screenAudioTrack);
             } else {
-                console.log('[WebRTC] Adding screen audio track');
                 this.pc.addTrack(screenAudioTrack, screenStream);
             }
         }
 
-        await this.renegotiate();
-        console.log('[WebRTC] Screen track added, renegotiation complete');
+        const ok = await this.renegotiate();
+        if (!ok) {
+            console.warn('[WebRTC] Screen share renegotiation failed');
+        }
+        return ok;
     }
 
     async removeScreenTrack(restoreAudioTrack = null) {
         if (!this.pc) return;
+
+        delete this.screenShareTrack;
 
         const senders = this.pc.getSenders();
         const videoSender = senders.find(s => s.track?.kind === 'video');
         const screenAudioSender = senders.find(s => s.track?.kind === 'audio' && s.track?.label?.toLowerCase().includes('screen'));
         
         if (videoSender) {
-            console.log('[WebRTC] Replacing video track with black');
-            const blackTrack = this.createBlackVideoTrack();
-            await videoSender.replaceTrack(blackTrack);
-            console.log('[WebRTC] Screen track replaced with black');
+            console.log('[WebRTC] Removing screen video track');
+            if (this.savedVideoTrack && this.savedVideoTrack.readyState === 'live') {
+                console.log('[WebRTC] Restoring original video track');
+                await videoSender.replaceTrack(this.savedVideoTrack);
+                delete this.savedVideoTrack;
+            } else {
+                console.log('[WebRTC] Replacing with black track');
+                const blackTrack = this.createBlackVideoTrack();
+                await videoSender.replaceTrack(blackTrack);
+                delete this.savedVideoTrack;
+            }
+            
+            const transceivers = this.pc.getTransceivers();
+            const videoTransceiver = transceivers.find(t => t.sender === videoSender);
+            if (videoTransceiver && videoTransceiver.direction === 'sendonly') {
+                videoTransceiver.direction = 'sendrecv';
+            }
         }
 
         if (screenAudioSender) {
@@ -705,6 +888,11 @@ export class WebRTCHandler {
                     await screenAudioSender.replaceTrack(audioTrack);
                 }
             }
+        }
+
+        const ok = await this.renegotiate();
+        if (!ok) {
+            console.warn('[WebRTC] Screen share remove renegotiation failed');
         }
     }
 
